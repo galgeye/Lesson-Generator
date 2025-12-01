@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Universal Lesson Planner v3 (Full Screen & Syllabus)</title>
+    
+    <!-- LIBRARIES -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script src="https://unpkg.com/docx@7.1.0/build/index.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=Cinzel:wght@700&display=swap" rel="stylesheet">
+
+    <style>
+        body { font-family: 'Inter', sans-serif; background: #f3f4f6; }
+        .cinzel { font-family: 'Cinzel', serif; }
+        
+        /* --- SLIDE CSS --- */
+        .slide-container { aspect-ratio: 16/9; background: #fafaf5; border-radius: 8px; overflow: hidden; position: relative; box-shadow: 0 10px 25px rgba(0,0,0,0.1); color: #2c3e50; transition: all 0.3s ease; }
+        
+        /* Native Fullscreen override */
+        .slide-container:fullscreen { 
+            border-radius: 0; 
+            width: 100vw; 
+            height: 100vh; 
+            aspect-ratio: auto; 
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        /* CSS Fallback Fullscreen */
+        .slide-container.css-fullscreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 9999;
+            border-radius: 0;
+            aspect-ratio: auto;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        
+        .slide-content { height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 3rem; }
+        
+        /* Layouts */
+        .bleed-layout { display: grid; grid-template-columns: 1fr 1fr; height: 100%; padding: 0; }
+        .bleed-text { padding: 3rem; display: flex; flex-direction: column; justify-content: center; }
+        .bleed-img { height: 100%; width: 100%; object-fit: cover; }
+        .two-column { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: center; height: 100%; }
+        
+        /* Components */
+        .card { background: white; padding: 1.5rem; border-left: 5px solid #f1c40f; margin-bottom: 1rem; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        .retrieval-box { background: #2c3e50; color: white; padding: 1.5rem; border-radius: 0.5rem; margin-top: 1rem; }
+        .retrieval-box h3 { color: #f1c40f; margin-bottom: 0.5rem; font-weight: bold; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; background: white; font-size: 0.9rem; }
+        th { background: #7b1113; color: white; padding: 10px; text-align: left; }
+        td { border: 1px solid #ddd; padding: 10px; vertical-align: top; }
+        .chain-container { display: flex; justify-content: space-between; align-items: center; margin-top: 2rem; }
+        .chain-box { background: white; border: 2px solid #7b1113; padding: 1rem; border-radius: 0.5rem; width: 22%; text-align: center; font-size: 0.8rem; }
+        .chain-arrow { font-size: 1.5rem; color: #f1c40f; }
+        .mermaid { display: flex; justify-content: center; margin-top: 1rem; }
+        
+        /* UI */
+        .tab-btn { padding: 0.5rem 1rem; border-bottom: 2px solid transparent; transition: all 0.2s; }
+        .tab-btn.active { border-color: #dc2626; color: #dc2626; font-weight: 600; }
+        @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+        .animate-fade-in { animation: fade-in 0.5s ease-out; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- EXTENSIVE SYLLABUS DATA (SOW Ideas) ---
+        const SYLLABUS_DATA = {
+            'AQA': {
+                'English Literature': ['Macbeth', 'Romeo and Juliet', 'A Christmas Carol', 'An Inspector Calls', 'Power & Conflict Poetry', 'Love & Relationships Poetry'],
+                'English Language': ['Explorations in Creative Reading', 'Writers Viewpoints', 'Spoken Language Study'],
+                'Mathematics': ['Algebra: Quadratics', 'Geometry: Circle Theorems', 'Number: Surds & Indices', 'Statistics: Histograms', 'Probability'],
+                'Science (Biology)': ['Cell Biology', 'Infection & Response', 'Bioenergetics', 'Homeostasis', 'Inheritance & Evolution', 'Ecology'],
+                'Science (Chemistry)': ['Atomic Structure', 'Bonding', 'Quantitative Chemistry', 'Chemical Changes', 'Energy Changes', 'Organic Chemistry'],
+                'Science (Physics)': ['Energy', 'Electricity', 'Particle Model of Matter', 'Atomic Structure', 'Forces', 'Waves', 'Magnetism'],
+                'History': ['Conflict and Tension 1918-1939', 'Germany 1890-1945', 'Elizabethan England', 'Medicine Through Time', 'Norman England'],
+                'Geography': ['Living with the Physical Environment', 'Challenges in the Human Environment', 'Physical Landscapes in the UK', 'Urban Issues'],
+                'Religious Studies': ['Christianity: Beliefs', 'Islam: Beliefs', 'Themes: Relationships & Families', 'Themes: Crime & Punishment'],
+                'Computer Science': ['Algorithms', 'Programming Techniques', 'Data Representation', 'Computer Systems', 'Cyber Security']
+            },
+            'Edexcel': {
+                'Mathematics': ['Number', 'Algebra', 'Ratio & Proportion', 'Geometry', 'Probability', 'Statistics'],
+                'History': ['Weimar and Nazi Germany', 'Early Elizabethan England', 'Superpower Relations', 'Medicine Through Time', 'American West'],
+                'Geography': ['The Changing Landscapes of the UK', 'Weather Hazards', 'Development Dynamics', 'Challenges of an Urbanising World'],
+                'Catholic RSE': ['Created and Loved by God', 'Created to Love Others', 'Created to Live in Community', 'Statutory: Consent', 'Statutory: Internet Safety', 'Theology of the Body'],
+                'Religious Studies': ['Catholic Christianity: Beliefs', 'Catholic Christianity: Practices', 'Judaism: Beliefs', 'Philosophy: Arguments for God', 'Philosophy: Religious Experience', 'Ethics: Marriage and the Family']
+            },
+            'OCR': {
+                'Computer Science': ['Systems Architecture', 'Memory and Storage', 'Networks', 'Network Security', 'Ethical Issues', 'Algorithms'],
+                'Science': ['Gateway: Particles', 'Gateway: Elements', 'Twenty First Century: You and Your Genes'],
+                'History': ['The People’s Health', 'The Norman Conquest', 'The Making of America']
+            },
+            'National Curriculum (KS3)': {
+                'English': ['Shakespeare Introduction', 'Gothic Horror', 'War Poetry', 'Rhetoric & Speeches', 'Modern Novel'],
+                'Mathematics': ['Number Mastery', 'Algebraic Thinking', 'Lines and Angles', 'Reasoning with Number', 'Constructing in 2D/3D'],
+                'Science': ['Cells & Organisation', 'States of Matter', 'Forces & Motion', 'Reproduction', 'Acids & Alkalis', 'Earth & Atmosphere'],
+                'History': ['The Norman Conquest 1066', 'Medieval Life', 'The Tudors & Stuarts', 'The Industrial Revolution', 'WW1 & WW2', 'The Holocaust'],
+                'Geography': ['Map Skills', 'Tectonics', 'Weather & Climate', 'Africa', 'Russia', 'International Development'],
+                'Religious Studies': ['The Island (Intro to Philosophy)', 'Who is Jesus?', 'Islam: Five Pillars', 'Sikhism', 'Hinduism', 'Ethics: Animal Rights'],
+                'Computer Science': ['E-Safety', 'Scratch Programming', 'Python Basics', 'Binary & Logic', 'Hardware & Software']
+            }
+        };
+
+        // --- APP COMPONENT ---
+        function App() {
+            const [view, setView] = useState('dashboard');
+            const [apiKey, setApiKey] = useState(localStorage.getItem('gemini_key') || '');
+            const [units, setUnits] = useState(JSON.parse(localStorage.getItem('teacher_units') || '[]'));
+            const [currentUnit, setCurrentUnit] = useState(null);
+
+            const saveKey = (key) => {
+                setApiKey(key);
+                localStorage.setItem('gemini_key', key);
+            };
+
+            const addUnit = (unit) => {
+                const newUnits = [...units, unit];
+                setUnits(newUnits);
+                localStorage.setItem('teacher_units', JSON.stringify(newUnits));
+                setCurrentUnit(unit);
+                setView('unit_view');
+            };
+
+            const deleteUnit = (id) => {
+                const newUnits = units.filter(u => u.id !== id);
+                setUnits(newUnits);
+                localStorage.setItem('teacher_units', JSON.stringify(newUnits));
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col">
+                    <Header apiKey={apiKey} setApiKey={saveKey} goHome={() => setView('dashboard')} />
+                    <main className="flex-grow p-6 container mx-auto">
+                        {view === 'dashboard' && (
+                            <Dashboard 
+                                units={units} 
+                                onCreate={() => setView('setup')} 
+                                onSelect={(u) => { setCurrentUnit(u); setView('unit_view'); }}
+                                onDelete={deleteUnit}
+                            />
+                        )}
+                        {view === 'setup' && <UnitSetup apiKey={apiKey} onComplete={addUnit} onCancel={() => setView('dashboard')} />}
+                        {view === 'unit_view' && currentUnit && (
+                            <UnitManager 
+                                unit={currentUnit} 
+                                apiKey={apiKey} 
+                                updateUnit={(u) => { 
+                                    const updated = units.map(un => un.id === u.id ? u : un);
+                                    setUnits(updated);
+                                    localStorage.setItem('teacher_units', JSON.stringify(updated));
+                                    setCurrentUnit(u);
+                                }} 
+                            />
+                        )}
+                    </main>
+                </div>
+            );
+        }
+
+        function Header({ apiKey, setApiKey, goHome }) {
+            const [showInput, setShowInput] = useState(!apiKey);
+            return (
+                <header className="bg-slate-800 text-white p-4 shadow-lg flex justify-between items-center">
+                    <div className="flex items-center gap-3 cursor-pointer" onClick={goHome}>
+                        <i className="fa-solid fa-graduation-cap text-yellow-400 text-2xl"></i>
+                        <div>
+                            <h1 className="cinzel text-xl font-bold">Universal Lesson Planner <span className="text-xs bg-yellow-500 text-slate-900 px-2 rounded">PRO</span></h1>
+                            <p className="text-xs text-slate-400">Sequential Learning • OFSTED • CSI • NC</p>
+                        </div>
+                    </div>
+                    <div>
+                        {showInput ? (
+                            <div className="flex gap-2">
+                                <input 
+                                    type="password" 
+                                    placeholder="Paste Gemini API Key" 
+                                    className="px-3 py-1 text-slate-900 rounded text-sm w-64"
+                                    onBlur={(e) => { if(e.target.value) { setApiKey(e.target.value); setShowInput(false); } }}
+                                />
+                            </div>
+                        ) : (
+                            <button onClick={() => setShowInput(true)} className="text-xs text-slate-400 hover:text-white">
+                                <i className="fa-solid fa-key mr-1"></i> Update Key
+                            </button>
+                        )}
+                    </div>
+                </header>
+            );
+        }
+
+        function Dashboard({ units, onCreate, onSelect, onDelete }) {
+            return (
+                <div className="animate-fade-in">
+                    <div className="flex justify-between items-center mb-8">
+                        <h2 className="text-3xl font-bold text-slate-800">My Curriculum Units</h2>
+                        <button onClick={onCreate} className="bg-red-700 hover:bg-red-800 text-white px-6 py-3 rounded shadow-lg flex items-center gap-2">
+                            <i className="fa-solid fa-plus"></i> Create New Unit
+                        </button>
+                    </div>
+                    
+                    {units.length === 0 ? (
+                        <div className="text-center py-20 bg-white rounded-lg shadow-sm border border-dashed border-slate-300">
+                            <i className="fa-solid fa-folder-open text-slate-300 text-6xl mb-4"></i>
+                            <p className="text-slate-500">No units found. Start planning your first unit!</p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            {units.map(unit => (
+                                <div key={unit.id} className="bg-white p-6 rounded-lg shadow-sm border-l-4 border-yellow-400 hover:shadow-md transition cursor-pointer relative group" onClick={() => onSelect(unit)}>
+                                    <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition">
+                                        <button onClick={(e) => { e.stopPropagation(); if(confirm('Delete unit?')) onDelete(unit.id); }} className="text-red-400 hover:text-red-700"><i className="fa-solid fa-trash"></i></button>
+                                    </div>
+                                    <h3 className="font-bold text-lg mb-1 text-slate-800 truncate">{unit.topic}</h3>
+                                    <div className="flex flex-wrap gap-2 text-xs text-slate-500 mb-4">
+                                        <span className="bg-slate-100 px-2 py-1 rounded">{unit.subject}</span>
+                                        <span className="bg-slate-100 px-2 py-1 rounded">{unit.board}</span>
+                                        <span className="bg-slate-100 px-2 py-1 rounded">{unit.level}</span>
+                                    </div>
+                                    <div className="flex justify-between items-end">
+                                        <span className="text-sm font-semibold text-red-700">{unit.sow.length} Lessons</span>
+                                        <i className="fa-solid fa-arrow-right text-slate-300"></i>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function UnitSetup({ apiKey, onComplete, onCancel }) {
+            const [loading, setLoading] = useState(false);
+            const [formData, setFormData] = useState({
+                board: 'Edexcel', ks: 'KS4 (GCSE)', subject: 'Religious Studies', level: 'Mixed Ability', topic: '', lessons: 6
+            });
+            const [availableTopics, setAvailableTopics] = useState([]);
+
+            // Update topics when Board or Subject changes
+            useEffect(() => {
+                let topics = [];
+                // 1. Check for specific board match
+                if (SYLLABUS_DATA[formData.board] && SYLLABUS_DATA[formData.board][formData.subject]) {
+                    topics = SYLLABUS_DATA[formData.board][formData.subject];
+                } 
+                // 2. Check for KS3 National Curriculum Match
+                else if (formData.ks === 'KS3 (National Curriculum)' && SYLLABUS_DATA['National Curriculum (KS3)'][formData.subject]) {
+                    topics = SYLLABUS_DATA['National Curriculum (KS3)'][formData.subject];
+                }
+                // 3. Fallback to generic list if available in AQA or Edexcel
+                else {
+                    topics = SYLLABUS_DATA['Edexcel'][formData.subject] || SYLLABUS_DATA['AQA'][formData.subject] || [];
+                }
+                setAvailableTopics(topics);
+            }, [formData.board, formData.subject, formData.ks]);
+
+            const handleGenerate = async () => {
+                if(!apiKey) return alert("Please enter API Key first");
+                setLoading(true);
+                
+                try {
+                    const prompt = `
+                        Act as Head of Department for ${formData.subject}.
+                        Create a sequential Scheme of Work (SOW) for ${formData.board} ${formData.ks}: Topic "${formData.topic}".
+                        Number of Lessons: ${formData.lessons}. Target Ability: ${formData.level}.
+                        
+                        Return ONLY a JSON array with this structure: 
+                        [{"lesson": 1, "title": "Lesson Title", "objective": "Learning Objective"}, ...]
+                        Ensure logical progression.
+                    `;
+                    
+                    const response = await callGemini(apiKey, prompt, true);
+                    const cleanJson = response.replace(/```json/g, '').replace(/```/g, '').trim();
+                    const sow = JSON.parse(cleanJson.substring(cleanJson.indexOf('['), cleanJson.lastIndexOf(']') + 1));
+                    
+                    onComplete({
+                        id: Date.now(),
+                        ...formData,
+                        sow: sow,
+                        lessonsData: {} 
+                    });
+                } catch(e) {
+                    alert("Error: " + e.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="max-w-4xl mx-auto bg-white p-8 rounded-xl shadow-xl animate-fade-in">
+                    <h2 className="text-2xl font-bold mb-6 text-slate-800 border-b pb-2">Unit Planner Setup</h2>
+                    
+                    <div className="grid grid-cols-2 gap-6 mb-4">
+                        <div>
+                            <label className="block text-sm font-bold text-slate-600 mb-1">Exam Board</label>
+                            <select className="w-full border p-2 rounded" value={formData.board} onChange={e => setFormData({...formData, board: e.target.value})}>
+                                <option>AQA</option><option>Edexcel</option><option>OCR</option><option>Eduqas</option><option>WJEC</option><option>CIE</option><option>IB</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-slate-600 mb-1">Key Stage</label>
+                            <select className="w-full border p-2 rounded" value={formData.ks} onChange={e => setFormData({...formData, ks: e.target.value})}>
+                                <option value="KS3 (National Curriculum)">KS3 (National Curriculum)</option>
+                                <option value="KS4 (GCSE)">KS4 (GCSE)</option>
+                                <option value="KS5 (A-Level)">KS5 (A-Level)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-6 mb-4">
+                        <div>
+                            <label className="block text-sm font-bold text-slate-600 mb-1">Subject</label>
+                            <select className="w-full border p-2 rounded" value={formData.subject} onChange={e => setFormData({...formData, subject: e.target.value})}>
+                                <option value="Religious Studies">Religious Studies</option>
+                                <option value="Catholic RSE">Catholic RSE</option>
+                                <option value="English Language">English Language</option>
+                                <option value="English Literature">English Literature</option>
+                                <option value="Mathematics">Mathematics</option>
+                                <option value="Science (Biology)">Science (Biology)</option>
+                                <option value="Science (Chemistry)">Science (Chemistry)</option>
+                                <option value="Science (Physics)">Science (Physics)</option>
+                                <option value="History">History</option>
+                                <option value="Geography">Geography</option>
+                                <option value="Computer Science">Computer Science</option>
+                                <option value="Business Studies">Business Studies</option>
+                                <option value="Psychology">Psychology</option>
+                                <option value="Sociology">Sociology</option>
+                                <option value="Art & Design">Art & Design</option>
+                                <option value="Music">Music</option>
+                                <option value="PE (Physical Education)">PE</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-slate-600 mb-1">Differentiation Level</label>
+                            <select className="w-full border p-2 rounded" value={formData.level} onChange={e => setFormData({...formData, level: e.target.value})}>
+                                <option value="High">High (Grades 7-9) - Critical Eval</option>
+                                <option value="Middle">Middle (Grades 5-6) - Application</option>
+                                <option value="Developing">Developing (Grades 1-4) - Recall</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="mb-4">
+                        <label className="block text-sm font-bold text-slate-600 mb-1">Unit Topic</label>
+                        <select 
+                            className="w-full border p-2 rounded mb-2 bg-slate-50" 
+                            onChange={e => setFormData({...formData, topic: e.target.value})}
+                        >
+                            <option value="">-- Choose suggested topic based on Spec --</option>
+                            {availableTopics.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                        <input 
+                            type="text" 
+                            className="w-full border p-2 rounded" 
+                            placeholder="OR Type your own topic here..." 
+                            onChange={e => setFormData({...formData, topic: e.target.value})} 
+                        />
+                    </div>
+                    
+                    <div className="mb-6">
+                        <label className="block text-sm font-bold text-slate-600 mb-1">Number of Lessons</label>
+                        <input type="number" className="w-full border p-2 rounded" value={formData.lessons} min="1" max="20" onChange={e => setFormData({...formData, lessons: e.target.value})} />
+                    </div>
+                    
+                    <div className="flex gap-4">
+                        <button onClick={handleGenerate} disabled={loading} className="flex-1 bg-red-700 text-white py-3 rounded font-bold hover:bg-red-800 disabled:opacity-50">
+                            {loading ? <i className="fa-solid fa-spinner fa-spin"></i> : "Generate Scheme of Work"}
+                        </button>
+                        <button onClick={onCancel} className="px-6 py-3 border rounded hover:bg-slate-50">Cancel</button>
+                    </div>
+                </div>
+            );
+        }
+
+        function UnitManager({ unit, apiKey, updateUnit }) {
+            const [selectedLessonIdx, setSelectedLessonIdx] = useState(0);
+            const [generating, setGenerating] = useState(false);
+            const [activeTab, setActiveTab] = useState('slides'); 
+
+            const currentLessonData = unit.lessonsData[selectedLessonIdx];
+            const lessonMeta = unit.sow[selectedLessonIdx];
+
+            const generateLesson = async () => {
+                setGenerating(true);
+                try {
+                    // 1. Generate Detailed Slides (using previous high-quality prompt structure)
+                    const slidesPrompt = `
+                        Act as an expert ${unit.subject} teacher. Create slides for Lesson ${lessonMeta.lesson}: "${lessonMeta.title}".
+                        Context: ${unit.board} ${unit.ks}. Ability: ${unit.level}.
+                        
+                        Return VALID JSON with this structure:
+                        {
+                            "mermaid": "Optional MERMAID diagram code (e.g. graph TD... diagram must be enclosed in double quotes e.g. \"graph TD...\"). IMPORTANT: Enclose all node labels in double quotes inside the string to prevent syntax errors with brackets. Example: A[\"Node Name (Detail)\"] --> B[\"Next Node\"]",
+                            "slides": [
+                                {"title": "Title Slide", "content": "HTML for title/LOs. Use <div class='bleed-text'>..."},
+                                {"title": "Do Now", "content": "HTML for 3 recall questions. Use <div class='card'>...</div>"},
+                                {"title": "Big Picture", "content": "HTML Intent/Key Terms. Use <div class='retrieval-box'>...</div>"},
+                                {"title": "New Information", "content": "HTML Direct Instruction. Use <div class='two-column'>...</div>"},
+                                {"title": "Guided Practice", "content": "HTML Scaffolded Task. Use <table> or <div class='chain-container'>...</div>"},
+                                {"title": "Independent Task", "content": "HTML Main Activity. Use <div class='card'>...</div>"},
+                                {"title": "Assessment", "content": "HTML Check for Understanding."},
+                                {"title": "Plenary", "content": "HTML Exit Ticket."}
+                            ],
+                            "image_prompts": ["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8"]
+                        }
+                        CRITICAL: Use proper HTML classes: 'card', 'two-column', 'retrieval-box', 'chain-box', 'chain-container'. 
+                        Do NOT use <html>/<body> tags.
+                    `;
+                    const slideRes = await callGemini(apiKey, slidesPrompt, true);
+                    const cleanSlides = slideRes.replace(/```json/g, '').replace(/```/g, '').trim();
+                    const slideJson = JSON.parse(cleanSlides.substring(cleanSlides.indexOf('{'), cleanSlides.lastIndexOf('}') + 1));
+
+                    // 2. Generate Adaptive Handouts
+                    const handoutPrompt = `
+                        Create Student Handouts for: ${lessonMeta.title}.
+                        Output JSON:
+                        {
+                            "support": "Markdown for low ability (cloze, definitions)",
+                            "core": "Markdown for middle ability (structured Qs)",
+                            "extension": "Markdown for high ability (scholarship, synthesis)"
+                        }
+                    `;
+                    const handoutRes = await callGemini(apiKey, handoutPrompt, true);
+                    const cleanHandouts = handoutRes.replace(/```json/g, '').replace(/```/g, '').trim();
+                    const handoutJson = JSON.parse(cleanHandouts.substring(cleanHandouts.indexOf('{'), cleanHandouts.lastIndexOf('}') + 1));
+
+                    // 3. Teacher Guide (Fix for blank docs: Ask for Markdown directly)
+                    const guidePrompt = `
+                        Create a Teacher Guide for ${lessonMeta.title} (${unit.subject}).
+                        Format: Markdown.
+                        Include:
+                        - Intent & Context
+                        - Common Misconceptions
+                        - Deep Dive Subject Knowledge / Catholic Link (if RSE)
+                        - Step-by-Step Script & Questioning
+                    `;
+                    const guideRes = await callGemini(apiKey, guidePrompt, false);
+
+                    const newData = {
+                        ...unit.lessonsData,
+                        [selectedLessonIdx]: {
+                            slides: slideJson.slides,
+                            mermaid: slideJson.mermaid,
+                            imagePrompts: slideJson.image_prompts, 
+                            handouts: handoutJson,
+                            guide: guideRes
+                        }
+                    };
+                    updateUnit({ ...unit, lessonsData: newData });
+
+                } catch(e) {
+                    console.error(e);
+                    alert("Generation Error: " + e.message);
+                } finally {
+                    setGenerating(false);
+                }
+            };
+
+            return (
+                <div className="flex h-[85vh] bg-white rounded-lg shadow overflow-hidden">
+                    {/* Sidebar */}
+                    <div className="w-72 bg-slate-50 border-r overflow-y-auto p-4 flex-shrink-0">
+                        <h3 className="font-bold text-slate-700 mb-4 uppercase text-sm tracking-wider">Unit Plan</h3>
+                        <div className="space-y-2">
+                            {unit.sow.map((l, idx) => (
+                                <div 
+                                    key={idx}
+                                    onClick={() => setSelectedLessonIdx(idx)}
+                                    className={`p-3 rounded text-sm cursor-pointer border-l-4 transition ${selectedLessonIdx === idx ? 'bg-white border-red-600 shadow-sm' : 'border-transparent hover:bg-slate-200'}`}
+                                >
+                                    <div className="font-bold text-slate-800">Lesson {idx+1}</div>
+                                    <div className="truncate text-slate-500">{l.title}</div>
+                                    {unit.lessonsData[idx] && <i className="fa-solid fa-check-circle text-green-500 mt-1"></i>}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Main Content */}
+                    <div className="flex-1 flex flex-col min-w-0">
+                        {!currentLessonData ? (
+                            <div className="flex-1 flex flex-col justify-center items-center p-8 text-center">
+                                <h2 className="text-3xl font-bold mb-4 text-slate-800">{lessonMeta.title}</h2>
+                                <p className="text-slate-500 mb-8 max-w-md">{lessonMeta.objective}</p>
+                                <button onClick={generateLesson} disabled={generating} className="bg-red-700 text-white px-8 py-4 rounded shadow-lg hover:bg-red-800 disabled:opacity-50 text-lg transition transform hover:-translate-y-1">
+                                    {generating ? <><i className="fa-solid fa-spinner fa-spin mr-2"></i> Designing Lesson...</> : "Generate Lesson Resources"}
+                                </button>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="bg-white border-b px-6 py-3 flex gap-6 shadow-sm z-10">
+                                    <button onClick={() => setActiveTab('slides')} className={`tab-btn ${activeTab==='slides'?'active':''}`}>Presentation</button>
+                                    <button onClick={() => setActiveTab('handouts')} className={`tab-btn ${activeTab==='handouts'?'active':''}`}>Worksheets</button>
+                                    <button onClick={() => setActiveTab('guide')} className={`tab-btn ${activeTab==='guide'?'active':''}`}>Teacher Guide</button>
+                                </div>
+
+                                <div className="flex-1 bg-slate-100 p-6 overflow-y-auto">
+                                    {activeTab === 'slides' && <SlideViewer slides={currentLessonData.slides} mermaidCode={currentLessonData.mermaid} imagePrompts={currentLessonData.imagePrompts} subject={unit.subject} />}
+                                    {activeTab === 'handouts' && <HandoutViewer handouts={currentLessonData.handouts} title={lessonMeta.title} />}
+                                    {activeTab === 'guide' && <GuideViewer content={currentLessonData.guide} title={lessonMeta.title} />}
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // --- SUB-COMPONENTS ---
+
+        function SlideViewer({ slides, mermaidCode, imagePrompts, subject }) {
+            const [current, setCurrent] = useState(0);
+            const containerRef = useRef(null);
+            const [isSimulatedFullscreen, setIsSimulatedFullscreen] = useState(false);
+            const [currentPersonaConfig, setCurrentPersonaConfig] = useState(null);
+            const [chatHistory, setChatHistory] = useState([]);
+            const [chatOpen, setChatOpen] = useState(false);
+            const [apiKey] = useState(localStorage.getItem('gemini_key')); // Retrieve key for chat
+
+            // Updated Persona Logic (moved here to access subject)
+            const personas = {
+                'CatholicRSE': { 
+                    religious: { title: "Ask the Theologian", role: "Catholic Moral Theologian", context: "Defend the Theology of the Body, Dignity of Life, and Gospel Values. Reference the Catechism (CCC).", icon: "fa-cross" },
+                    secular: { title: "Ask the Scientist", role: "Medical Doctor / Scientist", context: "Explain biological facts, statutory law, and public health data objectively.", icon: "fa-user-md" }
+                },
+                'Science': { 
+                    religious: { title: "Ask the Lead Scientist", role: "Lead Researcher", context: "Defend the Scientific Method, Peer Review, and Empirical Evidence.", icon: "fa-flask" },
+                    secular: { title: "Ethical Review Board", role: "Bioethicist", context: "Challenge the moral implications and potential consequences of this science.", icon: "fa-scale-balanced" }
+                },
+                'History': { 
+                    religious: { title: "Ask the Historian", role: "Academic Historian", context: "Rely on primary sources, corroboration, and established historical consensus.", icon: "fa-scroll" },
+                    secular: { title: "Ask the Revisionist", role: "Revisionist Historian", context: "Challenge the mainstream narrative. Ask 'Who wrote the history?' and offer alternative interpretations.", icon: "fa-question" }
+                },
+                'English': {
+                    religious: { title: "Ask the Critic", role: "Literary Critic", context: "Analyze themes, context, and authorial intent.", icon: "fa-feather" },
+                    secular: { title: "Ask the Editor", role: "Modern Editor", context: "Critique the text from a modern perspective (relevance, bias).", icon: "fa-pen-nib" }
+                },
+                'Mathematics': {
+                    religious: { title: "Ask the Mathematician", role: "Pure Mathematician", context: "Focus on the logic, proof, and beauty of the method.", icon: "fa-calculator" },
+                    secular: { title: "Real World App", role: "Engineer", context: "Ask 'When will I use this?'. Demand practical applications.", icon: "fa-building" }
+                },
+                'Computer Science': {
+                    religious: { title: "Ask the Developer", role: "Senior Developer", context: "Focus on clean code, algorithms, and efficiency.", icon: "fa-laptop-code" },
+                    secular: { title: "Ask the Hacker", role: "White Hat Hacker", context: "Challenge security flaws and edge cases.", icon: "fa-user-secret" }
+                },
+                'Religious Studies': {
+                    religious: { title: "Ask the Believer", role: "Religious Believer", context: "Defend the faith perspective using scripture and tradition.", icon: "fa-praying-hands" },
+                    secular: { title: "Ask the Humanist", role: "Humanist", context: "Challenge religion using reason, logic, and secular ethics.", icon: "fa-user" }
+                },
+                'default': {
+                    religious: { title: "Ask the Expert", role: "Subject Expert", context: "Provide authoritative knowledge.", icon: "fa-graduation-cap" },
+                    secular: { title: "Ask the Skeptic", role: "Critical Thinker", context: "Challenge assumptions and ask 'Why?'.", icon: "fa-question" }
+                }
+            };
+
+            const pConfig = personas[subject] || personas['default'];
+
+            useEffect(() => {
+                if(mermaidCode && current === 4) {
+                    try {
+                        mermaid.init(undefined, ".mermaid"); 
+                    } catch (e) {
+                        console.error("Mermaid Error:", e);
+                    }
+                }
+            }, [current, mermaidCode]);
+
+            // Add listener for Esc key to exit CSS fullscreen
+            useEffect(() => {
+                const handleEsc = (e) => {
+                    if (e.key === 'Escape' && isSimulatedFullscreen) {
+                        setIsSimulatedFullscreen(false);
+                    }
+                };
+                window.addEventListener('keydown', handleEsc);
+                return () => window.removeEventListener('keydown', handleEsc);
+            }, [isSimulatedFullscreen]);
+
+            const slide = slides[current];
+            const imgPrompt = (imagePrompts && imagePrompts[current]) ? imagePrompts[current] : "Education";
+            const isTitle = current === 0;
+
+            const toggleFullScreen = async () => {
+                if (!document.fullscreenElement && !isSimulatedFullscreen) {
+                    if (containerRef.current) {
+                        containerRef.current.requestFullscreen().catch(err => {
+                            console.warn("Native fullscreen blocked, using CSS fallback", err);
+                            setIsSimulatedFullscreen(true);
+                        });
+                    }
+                } else {
+                    if (document.fullscreenElement) document.exitFullscreen();
+                    setIsSimulatedFullscreen(false);
+                }
+            };
+
+            // Chat Functions
+            const openChat = (type) => {
+                setCurrentPersonaConfig(type === 'religious' ? pConfig.religious : pConfig.secular);
+                setChatHistory([]);
+                setChatOpen(true);
+            };
+
+            const sendChat = async (text) => {
+                if(!text) return;
+                const newHistory = [...chatHistory, { role: "user", parts: [{ text: text }] }];
+                setChatHistory(newHistory);
+                
+                try {
+                    const sys = `Role: ${currentPersonaConfig.role}. Context: ${currentPersonaConfig.context}. Keep replies short (<50 words).`;
+                    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents: newHistory, systemInstruction: { parts: [{ text: sys }] } })
+                    });
+                    const d = await r.json();
+                    const reply = d.candidates[0].content.parts[0].text;
+                    setChatHistory([...newHistory, { role: "model", parts: [{ text: reply }] }]);
+                } catch(e) {
+                    console.error(e);
+                }
+            };
+
+            return (
+                <div className="max-w-5xl mx-auto relative">
+                    <div className={`slide-container ${isSimulatedFullscreen ? 'css-fullscreen' : ''}`} ref={containerRef}>
+                        {isTitle ? (
+                            <div className="bleed-layout">
+                                <div className="bleed-text">
+                                    <div dangerouslySetInnerHTML={{__html: slide.content}} />
+                                </div>
+                                <img 
+                                    src={`https://image.pollinations.ai/prompt/${encodeURIComponent(imgPrompt + " educational style")}`} 
+                                    className="bleed-img"
+                                />
+                            </div>
+                        ) : (
+                            <div className="slide-content relative z-10">
+                                <h2 className="text-3xl cinzel text-red-800 mb-6 border-b-2 border-yellow-400 pb-2">{slide.title}</h2>
+                                
+                                {current === 4 && mermaidCode && (
+                                    <div className="mermaid mb-4 scale-75 origin-top">{mermaidCode}</div>
+                                )}
+
+                                <div className="text-lg leading-relaxed text-slate-800" dangerouslySetInnerHTML={{__html: slide.content}} />
+                                
+                                <img 
+                                    src={`https://image.pollinations.ai/prompt/${encodeURIComponent(imgPrompt + " minimal background")}`} 
+                                    className="absolute inset-0 w-full h-full object-cover opacity-5 -z-10 pointer-events-none"
+                                />
+                            </div>
+                        )}
+                        
+                        {/* Slide Controls */}
+                        <div className="absolute bottom-0 left-0 right-0 bg-slate-900 text-white p-3 flex justify-between items-center z-20">
+                            <button onClick={() => setCurrent(c => Math.max(0, c-1))} disabled={current===0} className="hover:text-yellow-400 disabled:opacity-30 px-4">
+                                <i className="fa-solid fa-backward"></i> Prev
+                            </button>
+                            <span className="text-sm font-mono">Slide {current + 1} / {slides.length}</span>
+                            <div className="flex gap-2">
+                                <button onClick={toggleFullScreen} className="hover:text-yellow-400 px-4" title="Full Screen">
+                                    <i className="fa-solid fa-expand"></i>
+                                </button>
+                                <button onClick={() => setCurrent(c => Math.min(slides.length-1, c+1))} disabled={current===slides.length-1} className="hover:text-yellow-400 disabled:opacity-30 px-4">
+                                    Next <i className="fa-solid fa-forward"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        {/* PERSONA TILES (Overlay) */}
+                        {!isTitle && (
+                            <div className="absolute top-4 right-4 z-50 flex gap-2">
+                                <div className="group relative">
+                                    <div onClick={() => openChat('religious')} className="w-10 h-10 bg-white rounded-full flex items-center justify-center border-2 border-red-700 text-red-700 shadow cursor-pointer hover:bg-red-700 hover:text-white transition">
+                                        <i className={`fa-solid ${pConfig.religious.icon}`}></i>
+                                    </div>
+                                    <div className="absolute top-12 right-0 bg-slate-800 text-white text-xs p-2 rounded hidden group-hover:block whitespace-nowrap">{pConfig.religious.title}</div>
+                                </div>
+                                <div className="group relative">
+                                    <div onClick={() => openChat('secular')} className="w-10 h-10 bg-white rounded-full flex items-center justify-center border-2 border-slate-600 text-slate-600 shadow cursor-pointer hover:bg-slate-600 hover:text-white transition">
+                                        <i className={`fa-solid ${pConfig.secular.icon}`}></i>
+                                    </div>
+                                    <div className="absolute top-12 right-0 bg-slate-800 text-white text-xs p-2 rounded hidden group-hover:block whitespace-nowrap">{pConfig.secular.title}</div>
+                                </div>
+                            </div>
+                        )}
+                        
+                        {/* CHAT OVERLAY */}
+                        {chatOpen && (
+                            <div className="absolute bottom-16 right-4 w-80 bg-white rounded-lg shadow-2xl border border-slate-200 z-50 flex flex-col overflow-hidden" style={{height: '400px'}}>
+                                <div className="bg-red-800 text-white p-3 flex justify-between items-center">
+                                    <span className="font-bold text-sm"><i className={`fa-solid ${currentPersonaConfig.icon} mr-2`}></i>{currentPersonaConfig.title}</span>
+                                    <button onClick={() => setChatOpen(false)} className="hover:text-yellow-400"><i className="fa-solid fa-times"></i></button>
+                                </div>
+                                <div className="flex-1 p-4 overflow-y-auto bg-slate-50">
+                                    <div className="bg-red-50 p-2 rounded mb-2 text-sm border-l-4 border-red-500 text-slate-700">
+                                        I am listening. What is your question?
+                                    </div>
+                                    {chatHistory.map((msg, i) => (
+                                        <div key={i} className={`mb-2 p-2 rounded text-sm max-w-[85%] ${msg.role === 'user' ? 'bg-slate-200 ml-auto text-right' : 'bg-red-50 mr-auto border-l-4 border-red-500'}`}>
+                                            {msg.parts[0].text}
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="p-2 border-t bg-white flex gap-2">
+                                    <input 
+                                        type="text" 
+                                        className="flex-1 border rounded px-2 py-1 text-sm" 
+                                        placeholder="Type here..."
+                                        onKeyPress={(e) => {
+                                            if (e.key === 'Enter') {
+                                                sendChat(e.target.value);
+                                                e.target.value = '';
+                                            }
+                                        }}
+                                    />
+                                    <button className="bg-red-700 text-white px-3 rounded text-sm" onClick={(e) => {
+                                        const input = e.target.previousElementSibling;
+                                        sendChat(input.value);
+                                        input.value = '';
+                                    }}>Send</button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function HandoutViewer({ handouts, title }) {
+            const [level, setLevel] = useState('core');
+            
+            const downloadDocx = () => {
+                const doc = new docx.Document({
+                    sections: [{
+                        properties: {},
+                        children: [
+                            new docx.Paragraph({ text: title, heading: docx.HeadingLevel.TITLE }),
+                            new docx.Paragraph({ text: `${level.toUpperCase()} Handout`, heading: docx.HeadingLevel.HEADING_2 }),
+                            new docx.Paragraph({ text: handouts[level] }) 
+                        ]
+                    }]
+                });
+                docx.Packer.toBlob(doc).then(blob => {
+                    saveAs(blob, `${title}_${level}_worksheet.docx`);
+                });
+            };
+
+            return (
+                <div className="bg-white p-6 rounded shadow max-w-4xl mx-auto min-h-full flex flex-col">
+                    <div className="flex justify-between mb-4 border-b pb-4">
+                        <div className="space-x-2">
+                            {['support', 'core', 'extension'].map(l => (
+                                <button key={l} onClick={() => setLevel(l)} className={`px-4 py-2 rounded capitalize font-semibold transition ${level===l ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                                    {l}
+                                </button>
+                            ))}
+                        </div>
+                        <button onClick={downloadDocx} className="text-blue-600 hover:text-blue-800 font-semibold"><i className="fa-solid fa-file-word mr-1"></i> Download .docx</button>
+                    </div>
+                    <div className="prose max-w-none flex-1 p-6 border rounded bg-slate-50" dangerouslySetInnerHTML={{__html: marked.parse(handouts[level])}} />
+                </div>
+            );
+        }
+
+        function GuideViewer({ content, title }) {
+            const downloadPDF = () => {
+                const element = document.getElementById('guide-content');
+                html2pdf().from(element).save(`${title}_TeacherGuide.pdf`);
+            };
+
+            return (
+                <div className="bg-white p-6 rounded shadow max-w-4xl mx-auto">
+                    <div className="flex justify-end mb-4 border-b pb-4">
+                        <button onClick={downloadPDF} className="text-red-600 hover:text-red-800 font-semibold"><i className="fa-solid fa-file-pdf mr-1"></i> Export PDF</button>
+                    </div>
+                    <div id="guide-content" className="prose max-w-none" dangerouslySetInnerHTML={{__html: marked.parse(content)}} />
+                </div>
+            );
+        }
+
+        // --- UTILS ---
+        async function callGemini(key, prompt, jsonMode) {
+            const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${key}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }],
+                    generationConfig: jsonMode ? { responseMimeType: "application/json" } : {}
+                })
+            });
+            const d = await r.json();
+            return d.candidates[0].content.parts[0].text;
+        }
+
+        // --- RENDER ROOT ---
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
